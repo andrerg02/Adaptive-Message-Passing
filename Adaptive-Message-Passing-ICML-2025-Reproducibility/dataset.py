@@ -149,7 +149,7 @@ class GraphPropertyPrediction(DatasetInterface):
         assert dim in ['25-35']
 
         # target has already been normalized by authors of ADGN paper
-        self.data_list = torch.load(self.raw_paths[0])
+        self.data_list = torch.load(self.raw_paths[0], weights_only=False)
 
     @property
     def raw_dir(self) -> str:
