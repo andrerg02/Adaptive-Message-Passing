@@ -12,6 +12,8 @@ from typing import Optional, Callable
 from collections import OrderedDict
 from torch import tanh
 
+from sheaf import FlatBundleConv
+
 
 class DGN_GraphProp(ModelInterface):
 
@@ -40,30 +42,61 @@ class DGN_GraphProp(ModelInterface):
         self.num_layers = config['num_layers']
         self.alpha = config.get('alpha', None)
 
+        self.stalk_dim = config.get('stalk_dim', 2)
+        self.gnn_layers = config.get('gnn_layers', None)
+        self.gnn_hidden = config.get('gnn_hidden', None)
+        self.gnn_type = config.get('gnn_type', 'SAGE')
+
         inp = self.input_dim
         self.emb = None
         if self.hidden_dim is not None:
-            self.emb = Linear(self.input_dim, self.hidden_dim)
+            if conv_layer == 'SheafConv':
+                self.emb = Linear(self.input_dim, self.hidden_dim * self.stalk_dim)
+            else:
+                self.emb = Linear(self.input_dim, self.hidden_dim)
             inp = self.hidden_dim
 
         if dim_edge_features == 0:
-            self.conv_layer = getattr(pyg_nn, conv_layer)
             self.conv = ModuleList()
-            for _ in range(self.num_layers):
-                if conv_layer == 'GINConv':
-                    mlp = Linear(inp, inp)
-                    self.conv.append(self.conv_layer(nn=mlp,
-                                                     train_eps=True))
-                elif conv_layer == 'GCN2Conv':
-                    self.conv.append(self.conv_layer(channels=inp,
-                                                     alpha=self.alpha))
-                else:
-                    self.conv.append(self.conv_layer(in_channels=inp,
-                                                     out_channels=inp))
+            if conv_layer == 'SheafConv':
+                for _ in range(self.num_layers):
+                    self.conv.append(
+                        FlatBundleConv(in_channels=inp,
+                                       out_channels=inp,
+                                       stalk_dimension=self.stalk_dim,
+                                       gnn_type=self.gnn_type,
+                                       gnn_layers=self.gnn_layers,
+                                       gnn_hidden=self.gnn_hidden))
+            else:
+                self.conv_layer = getattr(pyg_nn, conv_layer)
+                for _ in range(self.num_layers):
+                    if conv_layer == 'GINConv':
+                        mlp = Linear(inp, inp)
+                        self.conv.append(self.conv_layer(nn=mlp,
+                                                        train_eps=True))
+                    elif conv_layer == 'GCN2Conv':
+                        self.conv.append(self.conv_layer(channels=inp,
+                                                        alpha=self.alpha))
+                    else:
+                        self.conv.append(self.conv_layer(in_channels=inp,
+                                                        out_channels=inp))
         else:
             # DISCRETE EDGE TYPES ONLY
-            self.conv_layer = getattr(pyg_nn, conv_layer)
             self.convs = ModuleList()
+            if conv_layer == 'SheafConv':
+                self.convs.append(Linear(inp, self.stalk_dim*inp))
+                for _ in range(self.num_layers):
+                    edge_convs = ModuleList()
+                    for _ in range(self.dim_edge_features):
+                        edge_convs.append(
+                            FlatBundleConv(in_channels=inp,
+                                           out_channels=inp,
+                                           stalk_dimension=self.stalk_dim,
+                                           gnn_type=self.gnn_type,
+                                           gnn_layers=self.gnn_layers,
+                                           gnn_hidden=self.gnn_hidden))
+                    self.convs.append(edge_convs)
+            self.conv_layer = getattr(pyg_nn, conv_layer)
             for _ in range(self.num_layers):
                 edge_convs = ModuleList()
                 for _ in range(self.dim_edge_features):
@@ -82,19 +115,35 @@ class DGN_GraphProp(ModelInterface):
         self.node_level_task = not config['global_aggregation']
 
         if self.node_level_task:
-            self.readout = Sequential(OrderedDict([
-                ('L1', Linear(inp, inp // 2)),
+            if conv_layer == 'SheafConv':
+                self.readout = Sequential(OrderedDict([
+                ('L1', Linear(self.stalk_dim * inp, inp // 2)),
                 ('LeakyReLU1', LeakyReLU()),
                 ('L2', Linear(inp // 2, self.output_dim)),
                 ('LeakyReLU2', LeakyReLU())
             ]))
+            else:
+                self.readout = Sequential(OrderedDict([
+                    ('L1', Linear(inp, inp // 2)),
+                    ('LeakyReLU1', LeakyReLU()),
+                    ('L2', Linear(inp // 2, self.output_dim)),
+                    ('LeakyReLU2', LeakyReLU())
+                ]))
         else:
-            self.readout = Sequential(OrderedDict([
-                ('L1', Linear(inp * 3, (inp * 3) // 2)),
-                ('LeakyReLU1', LeakyReLU()),
-                ('L2', Linear((inp * 3) // 2, self.output_dim)),
-                ('LeakyReLU2', LeakyReLU())
-            ]))
+            if conv_layer == 'SheafConv':
+                self.readout = Sequential(OrderedDict([
+                    ('L1', Linear(self.stalk_dim * inp * 3, (inp * 3) // 2)),
+                    ('LeakyReLU1', LeakyReLU()),
+                    ('L2', Linear((inp * 3) // 2, self.output_dim)),
+                    ('LeakyReLU2', LeakyReLU())
+                ]))
+            else:
+                self.readout = Sequential(OrderedDict([
+                    ('L1', Linear(inp * 3, (inp * 3) // 2)),
+                    ('LeakyReLU1', LeakyReLU()),
+                    ('L2', Linear((inp * 3) // 2, self.output_dim)),
+                    ('LeakyReLU2', LeakyReLU())
+                ]))
 
     def forward(self, data: Data, retain_grad = False) -> torch.Tensor:
         x, edge_index, batch = data.x, data.edge_index, data.batch
@@ -103,6 +152,8 @@ class DGN_GraphProp(ModelInterface):
         if self.dim_edge_features > 0:
             edge_attr = data.edge_attr
             assert len(edge_attr.shape) == 1  # can only be [num_edges]
+            if self.conv_name == 'SheafConv':
+                edge_attr = self.convs[0](edge_attr)
 
         h_list = []
 

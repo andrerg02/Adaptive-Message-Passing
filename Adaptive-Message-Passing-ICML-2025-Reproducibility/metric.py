@@ -91,7 +91,8 @@ class UDN_ELBO_Regression(Metric):
                 entropy_qL,
                 qL_probs,
                 n_obs,
-                message_filters
+                message_filters,
+                _
             ),
         ) = outputs
 
@@ -267,7 +268,8 @@ class UDN_WeightedLogLikelihoodRegression(Metric):
                 entropy_qL,
                 qL_probs,
                 n_obs,
-                message_filters
+                message_filters,
+                _
             ),
         ) = outputs
 
@@ -320,7 +322,8 @@ class UDN_theta_hidden(Metric):
                 entropy_qL,
                 qL_probs,
                 n_obs,
-                message_filters
+                message_filters,
+                _
             ),
         ) = outputs
         return log_p_theta_hidden.sum(1), targets
@@ -351,7 +354,8 @@ class UDN_entropy(Metric):
                 entropy_qL,
                 qL_probs,
                 n_obs,
-                message_filters
+                message_filters,
+                _
             ),
         ) = outputs
         return entropy_qL.unsqueeze(1), targets
@@ -382,7 +386,8 @@ class UDN_prior_layer(Metric):
                 entropy_qL,
                 qL_probs,
                 n_obs,
-                message_filters
+                message_filters,
+                _
             ),
         ) = outputs
         return log_p_L.sum(1), targets
@@ -413,7 +418,8 @@ class UDN_theta_output(Metric):
                 entropy_qL,
                 qL_probs,
                 n_obs,
-                message_filters
+                message_filters,
+                _
             ),
         ) = outputs
         return log_p_theta_output.mean(1), targets
@@ -488,6 +494,7 @@ class UDN_Depth(Metric):
                 qL_probs,
                 n_obs,
                 message_filters,
+                _
             ),
         ) = outputs
 
